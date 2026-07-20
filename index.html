@@ -4114,6 +4114,10 @@ function sendCredentialsByEmail(reviewerKey) {
     const m = INST_CRITERIA.find(x => String(x.num) === String(cn));
     return m ? `معيار ${m.num}: ${m.title}` : cn;
   });
+  const critNamesEn = (rv.criteria||[]).map(cn => {
+    const m = INST_CRITERIA.find(x => String(x.num) === String(cn));
+    return m ? `Criterion ${m.num}: ${m.title}` : cn;
+  });
 
   // حفظ بيانات الإيميل في متغير عام للاستخدام من الأزرار
   window._emailData = {
@@ -4123,29 +4127,28 @@ function sendCredentialsByEmail(reviewerKey) {
     pass: rv.pass,
     criteria: critNames,
     text:
-      `السلام عليكم ورحمة الله وبركاته
-
-` +
-      `الأستاذ/ة ${rv.name}،
-
-` +
-      `نُفيدكم بأنه تم تعيينكم مراجعاً في منصة ضمان الجودة بجامعة الجوف.
-` +
-      `يُرجى الاطلاع على بيانات دخولكم:
-
-` +
-      `الاسم           : ${rv.name}
-` +
-      `اسم المستخدم    : ${reviewerKey}
-` +
-      `كلمة المرور     : ${rv.pass}
-` +
-      `رابط النظام     : https://osamashahin.github.io/jouf-quality2/
-
-` +
-      `المعايير المخصصة لكم:
-` +
-      critNames.map(c=>'- '+c).join('\n') + '\n\nيُرجى تغيير كلمة المرور بعد أول دخول.\n\nمع تحيات\nعمادة التطوير والجودة - جامعة الجوف'
+      `السلام عليكم ورحمة الله وبركاته\n\n` +
+      `الأستاذ/ة ${rv.name}،\n\n` +
+      `نُفيدكم بأنه تم تعيينكم مراجعاً في منصة ضمان الجودة بجامعة الجوف.\n` +
+      `يُرجى الاطلاع على بيانات دخولكم:\n\n` +
+      `الاسم           : ${rv.name}\n` +
+      `اسم المستخدم    : ${reviewerKey}\n` +
+      `كلمة المرور     : ${rv.pass}\n` +
+      `رابط النظام     : https://osamashahin.github.io/jouf-quality2/\n\n` +
+      `المعايير المخصصة لكم:\n` +
+      critNames.map(c=>'- '+c).join('\n') +
+      `\n\nيُرجى تغيير كلمة المرور بعد أول دخول.\n\nمع تحيات\nعمادة التطوير والجودة - جامعة الجوف\n\n` +
+      `════════════════════════════\n\n` +
+      `Dear ${rv.name},\n\n` +
+      `We are pleased to inform you that you have been appointed as a reviewer on the Quality Assurance Platform at Jouf University.\n` +
+      `Please find your login credentials below:\n\n` +
+      `Name       : ${rv.name}\n` +
+      `Username   : ${reviewerKey}\n` +
+      `Password   : ${rv.pass}\n` +
+      `System URL : https://osamashahin.github.io/jouf-quality2/\n\n` +
+      `Assigned criteria:\n` +
+      critNamesEn.map(c=>'- '+c).join('\n') +
+      `\n\nPlease change your password after your first login.\n\nBest regards,\nDeanship of Development and Quality - Jouf University`
   };
 
   // إزالة أي overlay سابق
@@ -4188,9 +4191,30 @@ function sendCredentialsByEmail(reviewerKey) {
           <div style="background:#fffbeb;border-right:3px solid #f59e0b;padding:10px 12px;border-radius:6px;font-size:12px;color:#92400e;font-family:Cairo">
             ⚠️ يُرجى تغيير كلمة المرور بعد أول دخول.
           </div>
+          <hr style="border:none;border-top:2px dashed #d4b8f0;margin:18px 0">
+          <div style="direction:ltr;text-align:left">
+            <p style="font-size:13px;color:#333;line-height:1.7;margin-bottom:14px">
+              Dear <strong>${rv.name}</strong>,<br><br>
+              We are pleased to inform you that you have been appointed as a reviewer on the <strong>Quality Assurance Platform</strong> at Jouf University.
+            </p>
+            <table style="width:100%;border-collapse:collapse;margin-bottom:14px;font-size:13px">
+              <tr style="background:#f3f0ff"><td style="padding:9px 12px;color:#6b3fa0;font-weight:700;border-bottom:1px solid #e9d5ff">Name</td><td style="padding:9px 12px;border-bottom:1px solid #e9d5ff">${rv.name}</td></tr>
+              <tr><td style="padding:9px 12px;color:#6b3fa0;font-weight:700;border-bottom:1px solid #e9d5ff">Username</td><td style="padding:9px 12px;font-family:monospace;border-bottom:1px solid #e9d5ff">${reviewerKey}</td></tr>
+              <tr style="background:#f3f0ff"><td style="padding:9px 12px;color:#6b3fa0;font-weight:700;border-bottom:1px solid #e9d5ff">Password</td><td style="padding:9px 12px;font-family:monospace;border-bottom:1px solid #e9d5ff">${rv.pass}</td></tr>
+              <tr><td style="padding:9px 12px;color:#6b3fa0;font-weight:700">System URL</td><td style="padding:9px 12px;font-size:11px"><a href="https://osamashahin.github.io/jouf-quality2/" style="color:#6b3fa0">https://osamashahin.github.io/jouf-quality2/</a></td></tr>
+            </table>
+            <div style="background:#f3f0ff;border-radius:8px;padding:12px;margin-bottom:12px">
+              <div style="color:#6b3fa0;font-weight:700;font-size:12px;margin-bottom:6px">📋 Assigned criteria:</div>
+              ${critNamesEn.map(c=>`<div style="font-size:12px;color:#444;padding:2px 0">• ${c}</div>`).join('')}
+            </div>
+            <div style="background:#fffbeb;border-left:3px solid #f59e0b;padding:10px 12px;border-radius:6px;font-size:12px;color:#92400e">
+              ⚠️ Please change your password after your first login.
+            </div>
+          </div>
         </div>
         <div style="background:#6b3fa0;padding:14px;text-align:center;border-radius:0 0 10px 10px">
           <div style="color:#d4b8f0;font-size:12px;font-family:Cairo">عمادة التطوير والجودة — جامعة الجوف</div>
+          <div style="color:#d4b8f0;font-size:11px">Deanship of Development and Quality — Jouf University</div>
         </div>
       </div>
       <div style="padding:0 16px 16px;display:flex;gap:8px">
@@ -4222,7 +4246,7 @@ function fallbackCopy(text, cb) {
 
 function openMailFromOverlay() {
   const d = window._emailData; if(!d) return;
-  const sub = encodeURIComponent('بيانات الدخول - نظام متابعة اعمال الجودة - جامعة الجوف');
+  const sub = encodeURIComponent('بيانات الدخول - منصة ضمان الجودة | Login Credentials - Quality Assurance Platform - Jouf University');
   const body = encodeURIComponent(d.text);
   window.location.href = 'mailto:' + d.to + '?subject=' + sub + '&body=' + body;
 }
