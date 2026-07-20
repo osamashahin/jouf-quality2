@@ -795,13 +795,52 @@ const ico = {
 function fill(u,p) { document.getElementById('usr').value=u; document.getElementById('pwd').value=p; document.getElementById('err').classList.remove('show'); }
 function togglePwd() { const p=document.getElementById('pwd'); p.type=p.type==='password'?'text':'password'; }
 
+// ─── تحميل حسابات المستخدمين من قاعدة البيانات قبل التحقق من الدخول ───
+// (يحل مشكلة: المراجعون والجهات المضافة وكلمات المرور المحدثة لا تظهر إلا بعد دخول الأدمن)
+async function loadUsersFromSettings() {
+  const settings = await sbGet('settings', 'select=*');
+  if (!settings || !settings.length) return;
+  settings.forEach(s => {
+    try {
+      const val = JSON.parse(s.value);
+      if (s.key === 'extra_agencies') {
+        Object.entries(val).forEach(([k, ag]) => {
+          EXTRA_AGENCIES[k] = ag;
+          if (ag.name_en) I18N[ag.name] = ag.name_en;
+          if (!USERS[k]) {
+            USERS[k] = {pass: ag.pass||'', name: ag.name, name_en: ag.name_en||'', role:'agency', agency:k,
+              grad:`linear-gradient(135deg,${ag.color}dd,${ag.color})`};
+          }
+        });
+      } else if (s.key === 'reviewers') {
+        REVIEWERS = val;
+        Object.entries(val).forEach(([k, rv]) => {
+          USERS[k] = {pass: rv.pass, name: rv.name, email: rv.email||'', role: 'reviewer',
+            reviewerCriteria: rv.criteria || [],
+            grad: rv.grad || 'linear-gradient(135deg,#065f46,#059669)'};
+        });
+      }
+    } catch(e) {}
+  });
+  // كلمات المرور المحدثة تُطبق أخيراً لتتجاوز القيم الافتراضية
+  settings.forEach(s => {
+    try {
+      if (s.key.startsWith('pass_')) {
+        const userId = s.key.replace('pass_', '');
+        const val = JSON.parse(s.value);
+        if (USERS[userId]) USERS[userId].pass = val.pass;
+      }
+    } catch(e) {}
+  });
+}
+
 async function doLogin() {
   const u=document.getElementById('usr').value.trim(), p=document.getElementById('pwd').value;
   const btn=document.getElementById('btn-login');
   document.getElementById('err').classList.remove('show');
   if(!u||!p) { showErr('يرجى إدخال اسم المستخدم وكلمة المرور'); return; }
   btn.innerHTML='جاري التحقق <span class="spinner"></span>'; btn.disabled=true;
-  await new Promise(r=>setTimeout(r,500));
+  try { await loadUsersFromSettings(); } catch(e) {}
   const user=USERS[u];
   if(!user||user.pass!==p) {
     btn.innerHTML='دخول ←'; btn.disabled=false;
