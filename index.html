@@ -1640,6 +1640,7 @@ async function cDecideReq(itemId, idx, decision) {
   rs[idx].history = decHistory;
   rs[idx].status = decision;
   rs[idx].committee_note = decision === 'returned' ? note : '';
+  delete rs[idx].return_request;
 
   try {
     loading(true, 'جاري حفظ القرار...');
@@ -1769,9 +1770,10 @@ function renderReqTimeline(r, reqText, idx) {
         const isAgency = ev.type === 'agency_upload';
         const isComplete = ev.type === 'committee_complete';
         const isReturn = ev.type === 'committee_return';
-        const dotColor = isAgency?'#2563eb':isComplete?'#16a34a':'#dc2626';
-        const bgColor  = isAgency?'#eff6ff':isComplete?'#f0fdf4':'#fef2f2';
-        const bdColor  = isAgency?'#bfdbfe':isComplete?'#bbf7d0':'#fecaca';
+        const isRequest = ev.type === 'return_request';
+        const dotColor = isAgency?'#2563eb':isComplete?'#16a34a':isRequest?'#f59e0b':'#dc2626';
+        const bgColor  = isAgency?'#eff6ff':isComplete?'#f0fdf4':isRequest?'#fffbeb':'#fef2f2';
+        const bdColor  = isAgency?'#bfdbfe':isComplete?'#bbf7d0':isRequest?'#fcd34d':'#fecaca';
         return `
           <div style="display:flex;gap:10px;margin-bottom:8px">
             <div style="display:flex;flex-direction:column;align-items:center">
@@ -2994,6 +2996,11 @@ function agOpenDetail(itemId) {
         </div>
         ${returnedNote}
         ${fileInfo}
+        ${r.status === 'under_review' ? (
+          r.return_request
+            ? `<div class="notif" style="background:#fffbeb;border:1px solid #fcd34d;color:#92400e;font-size:12px">🔔 تم إرسال طلب الإرجاع في ${fmtDate(r.return_request.at)} — بانتظار المراجع${r.return_request.reason?`<br><span style="font-size:11px">السبب: ${r.return_request.reason}</span>`:''}</div>`
+            : `<button class="btn btn-g btn-sm" style="border-color:#fcd34d;color:#92400e" onclick="agRequestReturn('${itemId}',${idx})">🔔 طلب إرجاع لاستبدال الملف</button>`
+        ) : ''}
         ${isLocked ? '' : `
           <div class="fg">
             <label class="fl">⬆ رفع الملف *</label>
@@ -3011,6 +3018,29 @@ function agOpenDetail(itemId) {
   `;
   showScreen('ag-detail');
   document.querySelectorAll('.sbi').forEach(s=>s.classList.remove('active'));
+}
+
+// ─── طلب إرجاع متطلب قيد المراجعة (لاستبدال ملف مرفوع بالخطأ) ───
+async function agRequestReturn(itemId, idx) {
+  const reason = (prompt('سبب طلب الإرجاع (مثال: رُفع ملف خاطئ ونرغب باستبداله):') || '').trim();
+  if (!reason) { toast('❗ يرجى كتابة سبب الطلب'); return; }
+  const it = ALL_ITEMS.find(i => i.id === itemId); if (!it) return;
+  const rs = getReqStatus(it);
+  if (!rs[idx] || rs[idx].status !== 'under_review') { toast('❗ المتطلب لم يعد قيد المراجعة'); return; }
+  const now = new Date().toISOString();
+  rs[idx].return_request = { reason, at: now, by: CU.name || CU.id };
+  const history = rs[idx].history || [];
+  history.push({ type:'return_request', label:'طلب إرجاع من الجهة', note: reason, date: now, by: CU.name || CU.id });
+  rs[idx].history = history;
+  try {
+    loading(true, 'جاري إرسال الطلب...');
+    await sbPatch('procedures', itemId, { req_status: JSON.stringify(rs) });
+    const reqs = getReqList(it);
+    await sbPost('activity_log', { msg:`🔔 [${it.agency_name}] طلب إرجاع المتطلب "${reqs[idx]}" من إجراء "${it.proc}" — السبب: ${reason}`, actor: CU.name });
+    await loadAll(); loading(false);
+    agOpenDetail(itemId);
+    toast('🔔 تم إرسال طلب الإرجاع للمراجع', true);
+  } catch(e) { loading(false); toast('❗ فشل الإرسال: ' + e.message); }
 }
 
 function agReqFile(inp, itemId, idx) {
@@ -3429,6 +3459,7 @@ async function admDecideReq(itemId,idx,decision) {
     note:decision==='returned'?note:'', date:decNow, by:CU.name||CU.id});
   rs[idx].history = decHistory;
   rs[idx].status=decision; rs[idx].committee_note=decision==='returned'?note:''; rs[idx].reviewed_by=CU.name; rs[idx].history=decHistory;
+  delete rs[idx].return_request;
   try {
     loading(true,'جاري حفظ القرار...');
     await sbPatch('procedures',itemId,{req_status:JSON.stringify(rs)});
@@ -4320,7 +4351,6 @@ function buildReviewer() {
     <div class="sbg">التقارير</div>
     <div class="sbi" onclick="openExportDialog()">${ico.doc}تصدير التقارير</div>
     <div class="sbg">السجلات</div>
-    <div class="sbi" onclick="sbAct(this);showScreen('rv-log');render_rv_log()">${ico.pen}سجل النشاط</div>
     <div class="sbg">الحساب</div>
     <div class="sbi" onclick="sbAct(this);showScreen('rv-profile');render_rv_profile()">${ico.pen}بياناتي وكلمة المرور</div>`;
 
@@ -4528,7 +4558,7 @@ function render_rv_appr() {
         <td style="font-size:11px;font-weight:600">${it.proc}</td>
         <td style="font-size:12px">${reqText}</td>
         <td style="font-size:11px">${AGS[it.agency]?.icon||''} ${it.agency_name}</td>
-        <td><span class="bdg bu">🔵 قيد المراجعة</span></td>
+        <td><span class="bdg bu">🔵 قيد المراجعة</span>${r.return_request?'<br><span class="bdg" style="background:#fef3c7;color:#92400e;margin-top:3px;display:inline-block">🔔 طلب إرجاع</span>':''}</td>
         <td><button class="btn btn-p btn-sm" onclick="rvOpenDetail('${it.id}',${idx})">اطلاع</button></td>
       </tr>`).join(''):'<tr><td colspan="6" class="empty">لا توجد متطلبات قيد المراجعة</td></tr>'}
       </tbody></table></div></div>`;
@@ -4575,6 +4605,7 @@ function rvOpenDetail(itemId, idx) {
         ${r.file_url?`<a href="${r.file_url}" target="_blank" class="btn btn-g btn-sm" style="margin-right:10px">⬇ تنزيل</a>`:''}
         <span style="color:var(--mu);font-size:10px;display:block;margin-top:4px">رُفع في: ${fmtDate(r.uploaded_at)}</span></div>`:''}
       ${r.agency_note?`<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 13px;margin-bottom:14px;font-size:12px"><strong style="color:#15803d">💬 ملاحظة الجهة:</strong><br>${r.agency_note}</div>`:''}
+      ${r.return_request?`<div style="background:#fffbeb;border:2px solid #f59e0b;border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:12.5px"><strong style="color:#92400e">🔔 الجهة تطلب إرجاع هذا المتطلب</strong><br><span style="color:#78350f">السبب: ${r.return_request.reason}</span><br><span style="color:#a16207;font-size:10.5px">${fmtDate(r.return_request.at)} — للموافقة اضغط «↩ معاد وفق الملاحظات» أدناه</span></div>`:''}
       <div class="fg"><label class="fl">ملاحظة عند الإعادة (اختياري)</label>
         <textarea class="fc" id="rvd-note-${itemId}-${idx}" placeholder="اكتب ملاحظتك للجهة..."></textarea></div>
       <div style="display:flex;gap:10px">
@@ -4602,6 +4633,7 @@ async function rvDecide(itemId, idx, decision) {
   rs[idx].committee_note=decision==='returned'?note:'';
   rs[idx].history=history;
   rs[idx].reviewed_by=CU.name;
+  delete rs[idx].return_request;
   try {
     loading(true,'جاري حفظ القرار...');
     await sbPatch('procedures', itemId, {req_status:JSON.stringify(rs)});
@@ -5074,9 +5106,8 @@ async function exportReportPDF() {
       const yTop = pageH - margin;                       // أعلى المساحة
       const imgTopY = yTop - scaledFullH + pIdx*usableH; // موضع أسفل الصورة
       page.drawImage(png, { x: margin, y: imgTopY, width: usableW, height: scaledFullH });
-      // علامة مائية قطرية
-      const wmW = Math.min(pageW*0.6, 360), wmH = wmW*(200/900);
-      page.drawImage(wmPng, { x:(pageW-wmW)/2, y:(pageH-wmH)/2, width:wmW, height:wmH, rotate: PDFLib.degrees(30), opacity:0.85 });
+      // علامة مائية صغيرة متناثرة قطرياً
+      tileWatermarkOnPdfPage(page, wmPng, pageW, pageH);
     }
 
     const bytes = await pdfDoc.save();
@@ -5340,6 +5371,69 @@ function arabicTextToImage(text, sub) {
   return canvas.toDataURL('image/png');
 }
 
+// ─── نثر ختم صغير مكرر قطرياً على صفحة PDF ───
+function tileWatermarkOnPdfPage(page, wmPng, pageW, pageH) {
+  const wmW = 150, wmH = wmW * (200/900);       // ختم صغير
+  const stepX = wmW * 1.5, stepY = wmH * 6.5;   // تباعد شبكة النثر
+  let row = 0;
+  for (let y = -stepY; y < pageH + stepY; y += stepY, row++) {
+    const off = (row % 2) ? stepX / 2 : 0;      // إزاحة الصفوف لنمط قطري
+    for (let x = -stepX; x < pageW + stepX; x += stepX) {
+      page.drawImage(wmPng, { x: x + off, y, width: wmW, height: wmH,
+        rotate: PDFLib.degrees(30), opacity: 0.35 });
+    }
+  }
+}
+
+// ─── تحميل صورة (JPG/PNG) مع ختم اعتماد صغير متناثر قطرياً ───
+async function downloadImageWithWatermark(fileUrl, fileName, viceName) {
+  try {
+    loading(true, 'جاري إضافة ختم الاعتماد...');
+    const resp = await fetch(fileUrl);
+    const blob = await resp.blob();
+    const bmp = await createImageBitmap(blob);
+    const canvas = document.createElement('canvas');
+    canvas.width = bmp.width; canvas.height = bmp.height;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(bmp, 0, 0);
+
+    const today = new Date().toLocaleDateString('ar-SA');
+    const stampData = arabicTextToImage('اعتماد: ' + viceName, 'منصة ضمان الجودة — ' + today);
+    const stamp = new Image();
+    await new Promise((res, rej) => { stamp.onload = res; stamp.onerror = rej; stamp.src = stampData; });
+
+    const wmW = Math.max(150, Math.round(canvas.width * 0.2));  // صغير نسبةً للصورة
+    const wmH = wmW * (stamp.height / stamp.width);
+    const stepX = wmW * 1.5, stepY = wmH * 6.5;
+    ctx.globalAlpha = 0.38;
+    let row = 0;
+    for (let y = -stepY; y < canvas.height + stepY; y += stepY, row++) {
+      const off = (row % 2) ? stepX / 2 : 0;
+      for (let x = -stepX; x < canvas.width + stepX; x += stepX) {
+        ctx.save();
+        ctx.translate(x + off + wmW/2, y + wmH/2);
+        ctx.rotate(-30 * Math.PI / 180);
+        ctx.drawImage(stamp, -wmW/2, -wmH/2, wmW, wmH);
+        ctx.restore();
+      }
+    }
+    ctx.globalAlpha = 1;
+
+    const isJpg = /\.(jpe?g)(\?|$)/i.test(fileName||'') || /\.(jpe?g)(\?|$)/i.test(fileUrl||'');
+    const outUrl = canvas.toDataURL(isJpg ? 'image/jpeg' : 'image/png', 0.92);
+    const a = document.createElement('a');
+    a.href = outUrl;
+    a.download = (fileName||'image').replace(/\.(png|jpe?g)$/i,'') + (isJpg ? '_معتمد.jpg' : '_معتمد.png');
+    document.body.appendChild(a); a.click(); a.remove();
+    loading(false);
+    toast('✅ تم تحميل الصورة مع ختم الاعتماد', true);
+  } catch(e) {
+    loading(false); console.error(e);
+    window.open(fileUrl, '_blank');
+    toast('تم فتح الملف الأصلي (تعذّر إضافة الختم)');
+  }
+}
+
 async function downloadPdfWithWatermark(fileUrl, fileName, viceName) {
   try {
     if (typeof PDFLib === 'undefined') {
@@ -5360,17 +5454,7 @@ async function downloadPdfWithWatermark(fileUrl, fileName, viceName) {
     const pages = pdfDoc.getPages();
     pages.forEach(page => {
       const {width, height} = page.getSize();
-      // نضع العلامة قطرياً في وسط الصفحة
-      const imgW = Math.min(width*0.7, 420);
-      const imgH = imgW * (200/900);
-      page.drawImage(pngImage, {
-        x: (width - imgW)/2,
-        y: (height - imgH)/2,
-        width: imgW,
-        height: imgH,
-        rotate: PDFLib.degrees(30),
-        opacity: 0.9
-      });
+      tileWatermarkOnPdfPage(page, pngImage, width, height);
     });
 
     const bytes = await pdfDoc.save();
@@ -5392,11 +5476,14 @@ async function downloadPdfWithWatermark(fileUrl, fileName, viceName) {
   }
 }
 
-// دالة موحّدة: PDF يُختم، غيره يُفتح مباشرة
+// دالة موحّدة: PDF والصور تُختم، وWord يُفتح مباشرة
 function smartDownload(fileUrl, fileName, viceName) {
   const isPdf = /\.pdf$/i.test(fileName||'') || /\.pdf(\?|$)/i.test(fileUrl||'');
+  const isImg = /\.(png|jpe?g)$/i.test(fileName||'') || /\.(png|jpe?g)(\?|$)/i.test(fileUrl||'');
   if (isPdf) {
     downloadPdfWithWatermark(fileUrl, fileName, viceName);
+  } else if (isImg) {
+    downloadImageWithWatermark(fileUrl, fileName, viceName);
   } else {
     window.open(fileUrl, '_blank');
   }
@@ -5773,7 +5860,6 @@ function buildVice() {
     <div class="sbi" onclick="sbAct(this);showScreen('vc-appr');render_vc_appr()">${ico.doc}اعتماد الوكالة<span class="sbdg" id="vc-bdg" style="background:#dc2626;animation:pulse 1.5s infinite">0</span></div>
     <div class="sbi" onclick="sbAct(this);showScreen('vc-track');render_vc_track()">${ico.list}متابعة المتطلبات</div>
     <div class="sbg">السجلات</div>
-    <div class="sbi" onclick="sbAct(this);showScreen('vc-log');render_vc_log()">${ico.pen}سجل النشاط</div>
     <div class="sbg">الحساب</div>
     <div class="sbi" onclick="sbAct(this);showScreen('vc-profile');render_vc_profile()">${ico.pen}بياناتي وكلمة المرور</div>`;
 
