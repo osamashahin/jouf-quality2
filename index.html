@@ -3038,7 +3038,9 @@ async function agRequestReturn(itemId, idx) {
     const reqs = getReqList(it);
     await sbPost('activity_log', { msg:`🔔 [${it.agency_name}] طلب إرجاع المتطلب "${reqs[idx]}" من إجراء "${it.proc}" — السبب: ${reason}`, actor: CU.name });
     await loadAll(); loading(false);
-    agOpenDetail(itemId);
+    const trackEl = document.getElementById('ag-track');
+    if (trackEl && trackEl.offsetParent !== null) { render_ag_track(); }
+    else { agOpenDetail(itemId); }
     toast('🔔 تم إرسال طلب الإرجاع للمراجع', true);
   } catch(e) { loading(false); toast('❗ فشل الإرسال: ' + e.message); }
 }
@@ -3143,16 +3145,22 @@ function render_ag_track() {
         else if (st==='under_review') badge = '<span class="bdg bu">🔵 قيد المراجعة</span>';
         else if (st==='returned')     badge = '<span class="bdg br">↩ معاد للملاحظات</span>';
         else if (st==='completed')    badge = '<span class="bdg ba">✅ مكتملة</span>';
+        const actions = (st==='under_review'
+          ? (r.return_request
+              ? '<span class="bdg" style="background:#fef3c7;color:#92400e;margin-bottom:4px;display:inline-block">🔔 طلب مُرسل</span><br>'
+              : `<button class="btn btn-g btn-sm" style="border-color:#fcd34d;color:#92400e;margin-bottom:4px" onclick="agRequestReturn('${it.id}',${idx})">🔔 طلب إرجاع</button><br>`)
+          : '') + `<button class="btn btn-g btn-sm" onclick="agShowTimeline('${it.id}',${idx})">📋 تفاصيل</button>`;
         return `
           <tr>
             <td style="font-weight:600;font-size:12px">${critLabel}</td>
             <td style="font-size:12px">${reqText}</td>
             <td>${badge}</td>
+            <td>${actions}</td>
           </tr>
           ${st==='returned' && r.committee_note
-            ? `<tr><td colspan="3" style="font-size:11px;color:#b91c1c;padding-right:28px">↩ ملاحظة: ${r.committee_note}</td></tr>`
+            ? `<tr><td colspan="4" style="font-size:11px;color:#b91c1c;padding-right:28px">↩ ملاحظة: ${r.committee_note}</td></tr>`
             : ''}`;
-      }).join('') : '<tr><td colspan="3" class="empty">لا توجد إجراءات مُرسلة بعد</td></tr>'}
+      }).join('') : '<tr><td colspan="4" class="empty">لا توجد إجراءات مُرسلة بعد</td></tr>'}
       </tbody>
     </table></div></div>`;
   setTimeout(()=>showFilterCount('af-track',rows.length,rows.length),0);
@@ -3198,20 +3206,25 @@ function render_ag_track_filtered() {
   const filtered=applyFilters(allRows,'af-track');
   const tbody=document.getElementById('af-track-body');
   if(!tbody) return;
-  tbody.innerHTML=filtered.length?filtered.map(({reqText,r,critLabel})=>{
+  tbody.innerHTML=filtered.length?filtered.map(({it,idx,reqText,r,critLabel})=>{
     let badge='';
     const st=r.status||'pending';
     if(st==='pending') badge='<span class="bdg bs">⬜ غير مكتمل</span>';
     else if(st==='under_review') badge='<span class="bdg bu">🔵 قيد المراجعة</span>';
     else if(st==='returned') badge='<span class="bdg br">↩ معاد للملاحظات</span>';
     else if(st==='completed') badge='<span class="bdg ba">✅ مكتملة</span>';
+    const actions=(st==='under_review'
+      ? (r.return_request
+          ? '<span class="bdg" style="background:#fef3c7;color:#92400e;margin-bottom:4px;display:inline-block">🔔 طلب مُرسل</span><br>'
+          : `<button class="btn btn-g btn-sm" style="border-color:#fcd34d;color:#92400e;margin-bottom:4px" onclick="agRequestReturn('${it.id}',${idx})">🔔 طلب إرجاع</button><br>`)
+      : '')+`<button class="btn btn-g btn-sm" onclick="agShowTimeline('${it.id}',${idx})">📋 تفاصيل</button>`;
     return `<tr>
       <td style="font-weight:600;font-size:12px">${critLabel}</td>
       <td style="font-size:12px">${reqText}</td>
       <td>${badge}</td>
-      <td><button class="btn btn-g btn-sm" onclick="agShowTimeline('${it.id}',${idx})">📋 تفاصيل</button></td>
+      <td>${actions}</td>
     </tr>`;
-  }).join(''):'<tr><td colspan="3" class="empty">لا توجد نتائج</td></tr>';
+  }).join(''):'<tr><td colspan="4" class="empty">لا توجد نتائج</td></tr>';
   showFilterCount('af-track',filtered.length,allRows.length);
 }
 
