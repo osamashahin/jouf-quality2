@@ -4616,7 +4616,10 @@ function rvOpenDetail(itemId, idx) {
       </div>
       ${r.file?`<div class="notif nok" style="margin-bottom:14px">📎 الملف المرفوع: <strong>${r.file}</strong>
         ${r.file_url?`<a href="${r.file_url}" target="_blank" class="btn btn-g btn-sm" style="margin-right:10px">⬇ تنزيل</a>`:''}
+        ${r.file_url && CU.role==='reviewer' ? `<button class="btn btn-g btn-sm" style="margin-right:6px;border-color:#a78bfa;color:#6b3fa0" onclick="rvAiCheck('${itemId}',${idx})">🤖 فحص ذكي</button>` : ''}
         <span style="color:var(--mu);font-size:10px;display:block;margin-top:4px">رُفع في: ${fmtDate(r.uploaded_at)}</span></div>`:''}
+      ${r.ai_check ? renderAiResult(r.ai_check) : ''}
+      <div id="ai-result-${itemId}-${idx}"></div>
       ${r.agency_note?`<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 13px;margin-bottom:14px;font-size:12px"><strong style="color:#15803d">💬 ملاحظة الجهة:</strong><br>${r.agency_note}</div>`:''}
       ${r.return_request?`<div style="background:#fffbeb;border:2px solid #f59e0b;border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:12.5px"><strong style="color:#92400e">🔔 الجهة تطلب إرجاع هذا المتطلب</strong><br><span style="color:#78350f">السبب: ${r.return_request.reason}</span><br><span style="color:#a16207;font-size:10.5px">${fmtDate(r.return_request.at)} — للموافقة اضغط «↩ معاد وفق الملاحظات» أدناه</span></div>`:''}
       <div class="fg"><label class="fl">ملاحظة عند الإعادة (اختياري)</label>
@@ -4627,6 +4630,68 @@ function rvOpenDetail(itemId, idx) {
       </div>
     </div>`;
   showScreen('rv-appr-detail');
+}
+
+// ─── الفحص الذكي (تجريبي): تحليل الأرقام والإحصائيات في الملف عبر دالة Supabase السحابية ───
+const AI_CHECK_URL = SUPABASE_PROJECT_URL + '/functions/v1/ai-check';
+
+function renderAiResult(res) {
+  if (!res) return '';
+  const flag = !!res.flag;
+  const bg = flag ? '#fef2f2' : '#f0fdf4';
+  const bd = flag ? '#fca5a5' : '#86efac';
+  const tc = flag ? '#b91c1c' : '#15803d';
+  const head = flag ? '🚩 يوجد تناقض محتمل في المستند' : '🟢 لا تناقضات ظاهرة في الأرقام';
+  const issues = (res.issues || []).slice(0, 6).map(i =>
+    `<li style="margin-bottom:5px">${i.description}${i.location ? ` <span style="color:#92400e;font-size:10.5px">(${i.location})</span>` : ''}</li>`
+  ).join('');
+  return `<div style="background:${bg};border:2px solid ${bd};border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:12.5px">
+    <strong style="color:${tc}">${head}</strong>
+    ${res.summary ? `<div style="margin-top:5px;color:#374151">${res.summary}</div>` : ''}
+    ${issues ? `<ul style="margin:8px 18px 0 0;padding:0;color:#7f1d1d">${issues}</ul>` : ''}
+    <div style="color:var(--mu);font-size:10px;margin-top:7px">🤖 نتيجة استرشادية من الذكاء الاصطناعي${res.at ? ' — ' + fmtDate(res.at) : ''} — القرار النهائي للمراجع</div>
+  </div>`;
+}
+
+async function rvAiCheck(itemId, idx) {
+  const it = ALL_ITEMS.find(i => i.id === itemId); if (!it) return;
+  const rs = getReqStatus(it);
+  const r = rs[idx]; if (!r || !r.file_url) return;
+  const box = document.getElementById(`ai-result-${itemId}-${idx}`);
+  const supported = /\.(pdf|png|jpe?g)(\?|$)/i.test(r.file_url) || /\.(pdf|png|jpe?g)$/i.test(r.file || '');
+  if (!supported) { toast('❗ الفحص الذكي يدعم ملفات PDF والصور فقط'); return; }
+  try {
+    if (box) box.innerHTML = '<div class="notif" style="background:#f3f0ff;border:1px solid #d4b8f0;color:#6b3fa0;margin-bottom:14px">🤖 جاري تحليل الأرقام والإحصائيات في المستند... قد يستغرق نصف دقيقة</div>';
+    const fr = await fetch(r.file_url);
+    const blob = await fr.blob();
+    if (blob.size > 15 * 1024 * 1024) { if (box) box.innerHTML=''; toast('❗ حجم الملف كبير على الفحص التجريبي (الحد 15MB)'); return; }
+    const b64 = await new Promise((res2, rej) => {
+      const fr2 = new FileReader();
+      fr2.onload = () => res2(fr2.result.split(',')[1]);
+      fr2.onerror = rej;
+      fr2.readAsDataURL(blob);
+    });
+    const isPdf = /\.pdf(\?|$)/i.test(r.file_url) || /\.pdf$/i.test(r.file || '');
+    const mime = isPdf ? 'application/pdf' : (/(jpe?g)/i.test(r.file_url + (r.file||'')) ? 'image/jpeg' : 'image/png');
+    const resp = await fetch(AI_CHECK_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY },
+      body: JSON.stringify({ file_b64: b64, mime, filename: r.file || '' })
+    });
+    if (!resp.ok) throw new Error(await resp.text());
+    const result = await resp.json();
+    if (result.error) throw new Error(result.error);
+    result.at = new Date().toISOString();
+    if (box) box.innerHTML = renderAiResult(result);
+    // حفظ العلم في قاعدة البيانات ليبقى ظاهراً
+    rs[idx].ai_check = { flag: !!result.flag, summary: result.summary || '', issues: (result.issues||[]).slice(0,6), at: result.at };
+    await sbPatch('procedures', itemId, { req_status: JSON.stringify(rs) });
+    toast(result.flag ? '🚩 رُصد تناقض محتمل — راجع التفاصيل' : '🟢 لا تناقضات ظاهرة', !result.flag);
+  } catch (e) {
+    console.error(e);
+    if (box) box.innerHTML = '';
+    toast('❗ تعذّر الفحص الذكي: ' + (e.message || e).slice(0, 120));
+  }
 }
 
 async function rvDecide(itemId, idx, decision) {
@@ -5384,6 +5449,76 @@ function arabicTextToImage(text, sub) {
   return canvas.toDataURL('image/png');
 }
 
+// ─── تحويل صيغة جهة الاعتماد: «وكيل الجامعة...» → «وكالة الجامعة...» ───
+function approvedEntityLabel(name) {
+  let n = (name || '').trim().replace(/^اعتماد[:\s]*/,'');
+  n = n.replace('وكيل الجامعة', 'وكالة الجامعة');
+  return n;
+}
+
+// ─── ختم اعتماد مستطيل فني (يُرسم على Canvas ثم يُدمج في الملف) ───
+function approvalSealImage(entityLabel, dateStr) {
+  const W = 780, H = 430, R = 26;
+  const canvas = document.createElement('canvas');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  const cx = W/2;
+  const col = 'rgba(107,63,160,0.95)';
+
+  function rrect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x+r, y);
+    ctx.arcTo(x+w, y,   x+w, y+h, r);
+    ctx.arcTo(x+w, y+h, x,   y+h, r);
+    ctx.arcTo(x,   y+h, x,   y,   r);
+    ctx.arcTo(x,   y,   x+w, y,   r);
+    ctx.closePath();
+  }
+
+  // إطار مزدوج بزوايا مشطوفة
+  ctx.strokeStyle = col;
+  ctx.lineWidth = 10; rrect(10, 10, W-20, H-20, R); ctx.stroke();
+  ctx.lineWidth = 3;  rrect(26, 26, W-52, H-52, R-8); ctx.stroke();
+
+  ctx.fillStyle = col;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.direction = 'rtl';
+
+  // «✓ معتمد» مع نجمتين زخرفيتين
+  ctx.font = 'bold 76px Cairo, Arial';
+  ctx.fillText('✓ معتمد', cx, 105);
+  ctx.font = '30px Arial';
+  ctx.fillText('✦', 80, 105); ctx.fillText('✦', W-80, 105);
+
+  // خط فاصل
+  ctx.lineWidth = 2.5;
+  ctx.beginPath(); ctx.moveTo(cx-190, 158); ctx.lineTo(cx+190, 158); ctx.stroke();
+
+  // اسم الوكالة (سطر أو سطران حسب الطول)
+  ctx.font = 'bold 38px Cairo, Arial';
+  const maxW = W - 140;
+  const words = entityLabel.split(' ');
+  const lines = [];
+  let cur = '';
+  words.forEach(w => {
+    const test = cur ? cur + ' ' + w : w;
+    if (ctx.measureText(test).width > maxW && cur) { lines.push(cur); cur = w; }
+    else cur = test;
+  });
+  if (cur) lines.push(cur);
+  const startY = lines.length > 1 ? 205 : 222;
+  lines.slice(0,2).forEach((ln, i) => ctx.fillText(ln, cx, startY + i*48));
+
+  // التاريخ
+  ctx.font = '29px Arial';
+  ctx.fillText(dateStr, cx, 318);
+
+  // اسم المنصة
+  ctx.font = '23px Cairo, Arial';
+  ctx.fillText('منصة ضمان الجودة — جامعة الجوف', cx, 372);
+
+  return canvas.toDataURL('image/png');
+}
+
 // ─── نثر ختم صغير مكرر قطرياً على صفحة PDF ───
 function tileWatermarkOnPdfPage(page, wmPng, pageW, pageH) {
   const wmW = 150, wmH = wmW * (200/900);       // ختم صغير
@@ -5406,30 +5541,25 @@ async function downloadImageWithWatermark(fileUrl, fileName, viceName) {
     const blob = await resp.blob();
     const bmp = await createImageBitmap(blob);
     const canvas = document.createElement('canvas');
-    canvas.width = bmp.width; canvas.height = bmp.height;
+    // شريط أبيض أعلى الصورة يحتضن الختم دون تغطية المحتوى
+    const sealH = Math.max(120, Math.round(bmp.width * 0.155));
+    const bandH = sealH + Math.round(sealH * 0.16);
+    canvas.width = bmp.width; canvas.height = bmp.height + bandH;
     const ctx = canvas.getContext('2d');
-    ctx.drawImage(bmp, 0, 0);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(bmp, 0, bandH);
 
     const today = new Date().toLocaleDateString('ar-SA');
-    const stampData = arabicTextToImage('اعتماد: ' + viceName, 'منصة ضمان الجودة — ' + today);
+    const stampData = approvalSealImage(approvedEntityLabel(viceName), today);
     const stamp = new Image();
     await new Promise((res, rej) => { stamp.onload = res; stamp.onerror = rej; stamp.src = stampData; });
 
-    const wmW = Math.max(150, Math.round(canvas.width * 0.2));  // صغير نسبةً للصورة
-    const wmH = wmW * (stamp.height / stamp.width);
-    const stepX = wmW * 1.5, stepY = wmH * 6.5;
-    ctx.globalAlpha = 0.38;
-    let row = 0;
-    for (let y = -stepY; y < canvas.height + stepY; y += stepY, row++) {
-      const off = (row % 2) ? stepX / 2 : 0;
-      for (let x = -stepX; x < canvas.width + stepX; x += stepX) {
-        ctx.save();
-        ctx.translate(x + off + wmW/2, y + wmH/2);
-        ctx.rotate(-30 * Math.PI / 180);
-        ctx.drawImage(stamp, -wmW/2, -wmH/2, wmW, wmH);
-        ctx.restore();
-      }
-    }
+    // الختم مستقيم داخل الشريط الأبيض العلوي (الزاوية اليمنى)
+    const sh = sealH;
+    const sw = Math.round(sh * (780/430));
+    ctx.globalAlpha = 0.95;
+    ctx.drawImage(stamp, canvas.width - sw - Math.round(canvas.width*0.02), Math.round(sealH*0.08), sw, sh);
     ctx.globalAlpha = 1;
 
     const isJpg = /\.(jpe?g)(\?|$)/i.test(fileName||'') || /\.(jpe?g)(\?|$)/i.test(fileUrl||'');
@@ -5457,20 +5587,32 @@ async function downloadPdfWithWatermark(fileUrl, fileName, viceName) {
     loading(true, 'جاري إضافة ختم الاعتماد...');
     const resp = await fetch(fileUrl);
     const buf = await resp.arrayBuffer();
-    const pdfDoc = await PDFLib.PDFDocument.load(buf, {ignoreEncryption:true});
+    const srcDoc = await PDFLib.PDFDocument.load(buf, {ignoreEncryption:true});
 
-    // صورة النص العربي
+    // الختم «معتمد – وكالة ...»
     const today = new Date().toLocaleDateString('ar-SA');
-    const imgData = arabicTextToImage('اعتماد: ' + viceName, 'منصة ضمان الجودة — ' + today);
-    const pngImage = await pdfDoc.embedPng(imgData);
+    const imgData = approvalSealImage(approvedEntityLabel(viceName), today);
 
-    const pages = pdfDoc.getPages();
-    pages.forEach(page => {
-      const {width, height} = page.getSize();
-      tileWatermarkOnPdfPage(page, pngImage, width, height);
+    // مستند جديد: كل صفحة تُضاف فوقها مساحة بيضاء يوضع فيها الختم دون تغطية المحتوى
+    const outDoc = await PDFLib.PDFDocument.create();
+    const pngImage = await outDoc.embedPng(imgData);
+    const embedded = await outDoc.embedPdf(srcDoc, srcDoc.getPageIndices());
+    embedded.forEach(ep => {
+      const w = ep.width, h = ep.height;
+      const sh = Math.min(w * 0.155, 92);        // ارتفاع الختم
+      const sw = sh * (780/430);
+      const band = sh + 16;                      // الشريط الأبيض العلوي
+      const page = outDoc.addPage([w, h + band]);
+      page.drawPage(ep, { x: 0, y: 0 });         // المحتوى الأصلي كما هو أسفل الشريط
+      page.drawImage(pngImage, {
+        x: w - sw - 24,                          // الزاوية العليا اليمنى داخل الشريط
+        y: h + 8,
+        width: sw, height: sh,
+        opacity: 0.95
+      });
     });
 
-    const bytes = await pdfDoc.save();
+    const bytes = await outDoc.save();
     const blob = new Blob([bytes], {type:'application/pdf'});
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
