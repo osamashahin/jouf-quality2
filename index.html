@@ -4673,9 +4673,10 @@ async function rvAiCheck(itemId, idx) {
     });
     const isPdf = /\.pdf(\?|$)/i.test(r.file_url) || /\.pdf$/i.test(r.file || '');
     const mime = isPdf ? 'application/pdf' : (/(jpe?g)/i.test(r.file_url + (r.file||'')) ? 'image/jpeg' : 'image/png');
+    // طلب بسيط (text/plain بدون ترويسات مخصصة) يتخطى فحص preflight نهائياً
     const resp = await fetch(AI_CHECK_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY },
+      headers: { 'Content-Type': 'text/plain' },
       body: JSON.stringify({ file_b64: b64, mime, filename: r.file || '' })
     });
     if (!resp.ok) throw new Error(await resp.text());
