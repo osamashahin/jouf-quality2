@@ -400,6 +400,31 @@ let VICE_FLOW = {};
 let LANG = localStorage.getItem('qa_lang') || 'ar';
 
 const I18N = {
+  // أسماء الجهات والوكلاء
+  'وكالة الجامعة للشؤون التعليمية': 'Vice-Rectorate for Educational Affairs',
+  'وكالة الجامعة للدراسات العليا والبحث العلمي': 'Vice-Rectorate for Graduate Studies & Scientific Research',
+  'وكالة الجامعة': 'University Vice-Rectorate',
+  'وكيل الجامعة للشؤون التعليمية': 'Vice-Rector for Educational Affairs',
+  'وكيل الجامعة للدراسات العليا والبحث العلمي': 'Vice-Rector for Graduate Studies & Scientific Research',
+  'وكيل الجامعة': 'University Vice-Rector',
+  'عمادة التطوير والجودة': 'Deanship of Development & Quality',
+  // بطاقات الإحصائيات والعناوين الفرعية
+  'لم يُرفع': 'Not Uploaded',
+  'لم يرفع': 'Not Uploaded',
+  'الإجمالي': 'Total',
+  'متطلب': 'requirements',
+  'مدير النظام — صلاحيات كاملة': 'System Administrator — Full Access',
+  'مقيد بمحاورك المخصصة': 'Restricted to your assigned axes',
+  // نموذج إرسال الإجراء
+  'المحور الرئيسي': 'Main Axis',
+  'المحور الفرعي (الإجراء)': 'Sub-Axis (Procedure)',
+  'نموذج استرشادي (اختياري)': 'Guide Template (optional)',
+  'أرفق نموذجاً استرشادياً للجهة': 'Attach a guide template for the agency',
+  'الملاحظات والتعليمات للجهة': 'Notes & Instructions for the Agency',
+  'اكتب المتطلبات...': 'Write the requirements...',
+  '— اختر —': '— Select —',
+  'إرسال ←': 'Send →',
+  'مسح': 'Clear',
   // ميزات حديثة: الفحص الذكي وطلب الإرجاع
   'فحص ذكي': 'Smart Check',
   'طلب إرجاع لاستبدال الملف': 'Request Return to Replace File',
@@ -626,13 +651,30 @@ function translateContainer(containerId) {
     node.childNodes.forEach(child => {
       if (child.nodeType === 3) {
         const txt = child.textContent.trim();
-        if (txt && I18N[txt]) child.textContent = child.textContent.replace(txt, I18N[txt]);
+        if (!txt) return;
+        if (I18N[txt]) { child.textContent = child.textContent.replace(txt, I18N[txt]); return; }
+        // تحمّل اللواحق الشائعة: «العنوان *» أو «العنوان:»
+        const m = txt.match(/^(.*?)\s*([\*:：]+)$/);
+        if (m && I18N[m[1].trim()]) child.textContent = child.textContent.replace(txt, I18N[m[1].trim()] + ' ' + m[2]);
       } else if (child.nodeType === 1 && !['SCRIPT','STYLE','INPUT','TEXTAREA'].includes(child.tagName)) {
         walk(child);
       }
     });
   };
   walk(root);
+  // ترجمة السمات النصية داخل الحاوية
+  root.querySelectorAll('[placeholder]').forEach(el => {
+    const p = (el.getAttribute('placeholder')||'').trim();
+    if (p && I18N[p]) el.setAttribute('placeholder', I18N[p]);
+  });
+  root.querySelectorAll('[title]').forEach(el => {
+    const p = (el.getAttribute('title')||'').trim();
+    if (p && I18N[p]) el.setAttribute('title', I18N[p]);
+  });
+  root.querySelectorAll('option').forEach(el => {
+    const p = el.textContent.trim();
+    if (p && I18N[p]) el.textContent = I18N[p];
+  });
 }
 
 // ترجمة عناصر صفحة الدخول الثابتة (تُستدعى عند en)
@@ -1212,7 +1254,7 @@ function render_c_home() {
               <strong>${d.v}</strong>
               <span style="color:var(--mu);font-size:10px">${totalExpectedReqs?Math.round(d.v/totalExpectedReqs*100):0}%</span>
             </div>`).join('')}
-            <div style="border-top:1px solid var(--bd);margin-top:8px;padding-top:8px;font-size:12px;font-weight:700">الإجمالي: ${totalExpectedReqs} متطلب</div>
+            <div style="border-top:1px solid var(--bd);margin-top:8px;padding-top:8px;font-size:12px;font-weight:700">${t('الإجمالي')}: ${totalExpectedReqs} ${t('متطلب')}</div>
           </div>
         </div>
       </div>
@@ -3404,7 +3446,7 @@ function render_adm_home()   {
             <span style="flex:1">${d.l}</span><strong>${d.v}</strong>
             <span style="color:var(--mu);font-size:10px">${totalExpectedReqs?Math.round(d.v/totalExpectedReqs*100):0}%</span>
           </div>`).join('')}
-          <div style="border-top:1px solid var(--bd);margin-top:8px;padding-top:8px;font-size:12px;font-weight:700">الإجمالي: ${totalExpectedReqs} متطلب</div></div>
+          <div style="border-top:1px solid var(--bd);margin-top:8px;padding-top:8px;font-size:12px;font-weight:700">${t('الإجمالي')}: ${totalExpectedReqs} ${t('متطلب')}</div></div>
         </div>
       </div>
       <div class="card"><div class="ctit">${ico.ppl}الجهات</div>
@@ -5258,20 +5300,21 @@ async function exportReportPDF() {
     const scaledFullH = canvas.height * scale;    // ارتفاع الصورة كاملة داخل الصفحة
     const usableH = pageH - margin*2;
 
-    // علامة مائية
-    const wmData = arabicTextToImage('تصدير: ' + exporter, 'منصة ضمان الجودة — ' + today);
+    // ختم مستقيم أعلى الصفحة داخل شريط أبيض (بنفس نمط ختم الاعتماد)
+    const wmData = approvalSealImage(approvedEntityLabel(exporter), today);
     const wmPng = await pdfDoc.embedPng(wmData);
+    const sealH = Math.min(pageW * 0.14, 85);
+    const sealW = sealH * (780/430);
+    const band = sealH + 14;
 
     // عدد الصفحات
     const pages = Math.max(1, Math.ceil(scaledFullH / usableH));
     for (let pIdx = 0; pIdx < pages; pIdx++) {
-      const page = pdfDoc.addPage([pageW, pageH]);
-      // نزيح الصورة لأعلى بمقدار الصفحة الحالية، ونثبّت الأعلى في أعلى المساحة القابلة للاستخدام
+      const page = pdfDoc.addPage([pageW, pageH + band]);
       const yTop = pageH - margin;                       // أعلى المساحة
       const imgTopY = yTop - scaledFullH + pIdx*usableH; // موضع أسفل الصورة
       page.drawImage(png, { x: margin, y: imgTopY, width: usableW, height: scaledFullH });
-      // علامة مائية صغيرة متناثرة قطرياً
-      tileWatermarkOnPdfPage(page, wmPng, pageW, pageH);
+      page.drawImage(wmPng, { x: pageW - sealW - 24, y: pageH + 6, width: sealW, height: sealH, opacity: 0.95 });
     }
 
     const bytes = await pdfDoc.save();
